@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# FridgeIntel local data
+# `flet run` keeps the database under .flet/storage/data, but running
+# `python3 main.py` directly drops it in the project root instead.
+fridge.db
+fridge.db-journal
+fridge.db-wal
+fridge.db-shm
