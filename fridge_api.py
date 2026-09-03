@@ -190,14 +190,16 @@ class FridgeApi:
     def whoami(self) -> dict:
         return self._rpc("whoami") or {}
 
-    def create_household(self, name: str, display_name: str) -> str:
+    def create_household(self, name: str, display_name: str,
+                         icon: str = "kitchen") -> str:
         if not (name or "").strip():
             raise ApiError("Give your household a name.")
         if not (display_name or "").strip():
             raise ApiError("Enter your own name.")
         return self._rpc(
             "create_household",
-            {"name": name.strip(), "display_name": display_name.strip()},
+            {"name": name.strip(), "display_name": display_name.strip(),
+             "icon": icon or "kitchen"},
         )
 
     def join_household(self, code: str, display_name: str) -> None:
@@ -212,6 +214,45 @@ class FridgeApi:
 
     # ----- the fridge --------------------------------------------------
 
+    # ----- profile ------------------------------------------------------
+
+    def set_profile(self, username: str, avatar: str) -> None:
+        username = (username or "").strip()
+        if not 1 <= len(username) <= 32:
+            raise ApiError("Username must be 1 to 32 characters.")
+        self._rpc("set_profile",
+                  {"new_username": username, "new_avatar": avatar or "apple"})
+
+    def delete_account(self) -> None:
+        """Remove the account and everything that hangs off it."""
+        self._rpc("delete_account")
+        self.sign_out()
+
+    # ----- household management -----------------------------------------
+
+    def members(self) -> list[dict]:
+        return self._rpc("household_members") or []
+
+    def update_household(self, name: str, icon: str) -> None:
+        name = (name or "").strip()
+        if not 1 <= len(name) <= 40:
+            raise ApiError("Household name must be 1 to 40 characters.")
+        self._rpc("update_household", {"new_name": name, "new_icon": icon})
+
+    def delete_household(self) -> None:
+        self._rpc("delete_household")
+
+    def remove_member(self, user_id: str) -> None:
+        self._rpc("remove_member", {"target": user_id})
+
+    def leave_household(self) -> None:
+        self._rpc("leave_household")
+
+    def transfer_ownership(self, user_id: str) -> None:
+        self._rpc("transfer_ownership", {"target": user_id})
+
+    # ----- the fridge ---------------------------------------------------
+
     def fridge_state(self) -> dict:
         """Capacity, items and history in one round trip."""
         state = self._rpc("fridge_state") or {}
@@ -219,6 +260,7 @@ class FridgeApi:
             "capacity": state.get("capacity") or 0,
             "items": state.get("items") or [],
             "history": state.get("history") or [],
+            "catalog": state.get("catalog") or [],
         }
 
     def save_items(self, entries: list[dict]) -> None:

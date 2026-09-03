@@ -11,8 +11,16 @@ Credentials come from SUPABASE_URL and SUPABASE_ANON_KEY in the environment;
 see config.example.py for the local-development alternative.
 """
 
-import flet as ft
+from flet_web.fastapi import app as flet_asgi_app
 
 from main import main
 
-app = ft.run(main, view=ft.AppView.WEB_BROWSER, export_asgi_app=True)
+# app_name / app_short_name feed the PWA manifest and the iOS web-app title.
+# Without them the home-screen icon is labelled "Flet", which is not much use
+# to a roommate looking for the fridge app.
+app = flet_asgi_app(
+    main,
+    app_name="FridgeIntel",
+    app_short_name="FridgeIntel",
+    app_description="Shared fridge for the household",
+)
