@@ -1,0 +1,4 @@
+flet==0.86.5
+flet-web==0.86.5
+httpx>=0.27
+uvicorn[standard]>=0.30

@@ -1,0 +1,16 @@
+# Render blueprint. Used when the service is created from this file
+# ("New +" -> "Blueprint"); an existing service keeps its dashboard settings.
+services:
+  - type: web
+    name: fridgeintel
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      # Set these two in the Render dashboard. sync:false means Render will
+      # prompt for them rather than storing values in the repo.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false

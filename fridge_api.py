@@ -8,14 +8,15 @@ reading a quantity here and writing it back would silently lose whichever edit
 landed second.
 """
 
-import contextlib
-import json
 import os
 import threading
 
 import httpx
 
-import config
+try:
+    import config
+except ModuleNotFoundError:                      # no local config.py
+    config = None
 
 # How long any single request may take. Phones on flaky wifi need a real
 # timeout rather than hanging the UI thread forever.
@@ -26,21 +27,38 @@ class ApiError(Exception):
     """A message already fit to show the user."""
 
 
-def _session_file() -> str:
-    return os.path.join(os.getenv("FLET_APP_STORAGE_DATA", "."), "session.json")
+def _setting(name: str) -> str | None:
+    """Read a credential from the environment, falling back to config.py.
+
+    The environment comes first so a deploy pipeline can inject values without
+    a gitignored file; config.py keeps local development a one-step setup.
+    """
+    return os.getenv(name) or getattr(config, name, None)
 
 
 class FridgeApi:
     """Talks to Supabase over REST. One instance per running app."""
 
     def __init__(self, url: str | None = None, anon_key: str | None = None):
-        self.url = (url or config.SUPABASE_URL).rstrip("/")
-        self.anon_key = anon_key or config.SUPABASE_ANON_KEY
+        url = url or _setting("SUPABASE_URL")
+        anon_key = anon_key or _setting("SUPABASE_ANON_KEY")
+        if not url or not anon_key:
+            raise ApiError(
+                "No Supabase credentials. Set SUPABASE_URL and "
+                "SUPABASE_ANON_KEY, or copy config.example.py to config.py."
+            )
+        self.url = url.rstrip("/")
+        self.anon_key = anon_key
         self.access_token: str | None = None
         self.refresh_token: str | None = None
         self.email: str | None = None
-        self._lock = threading.Lock()
         self._client = httpx.Client(timeout=TIMEOUT)
+        # Supabase invalidates a refresh token once it is used. Two requests
+        # failing at the same time would otherwise both try to spend it, and
+        # the loser would be signed out for no reason.
+        self._refresh_lock = threading.Lock()
+        # Set by the app to persist the rotating refresh token per browser.
+        self.on_token_change = None
 
     # ----- plumbing ----------------------------------------------------
 
@@ -93,7 +111,10 @@ class FridgeApi:
         self.access_token = data.get("access_token")
         self.refresh_token = data.get("refresh_token")
         self.email = (data.get("user") or {}).get("email")
-        self._save_session()
+        # Supabase rotates the refresh token on every use, so hand the new one
+        # back for the caller to store against *this* browser.
+        if self.on_token_change:
+            self.on_token_change(self.refresh_token, self.email)
 
     def sign_up(self, email: str, password: str) -> None:
         email, password = email.strip(), password or ""
@@ -120,6 +141,11 @@ class FridgeApi:
         self._adopt(r.json())
 
     def _refresh(self) -> bool:
+        with self._refresh_lock:
+            return self._refresh_locked()
+
+    def _refresh_locked(self) -> bool:
+        before = self.access_token
         try:
             r = self._client.post(
                 self.url + "/auth/v1/token?grant_type=refresh_token",
@@ -129,6 +155,10 @@ class FridgeApi:
         except httpx.RequestError:
             return False
         if r.status_code >= 400:
+            # Another thread may have refreshed successfully while this one
+            # waited for the lock; only give up if the token really is stale.
+            if self.access_token and self.access_token != before:
+                return True
             self.sign_out()
             return False
         self._adopt(r.json())
@@ -136,30 +166,20 @@ class FridgeApi:
 
     def sign_out(self) -> None:
         self.access_token = self.refresh_token = self.email = None
-        with contextlib.suppress(OSError):
-            os.remove(_session_file())
+        if self.on_token_change:
+            self.on_token_change(None, None)
 
     # ----- staying logged in across launches ---------------------------
 
-    def _save_session(self) -> None:
-        if not self.refresh_token:
-            return
-        with contextlib.suppress(OSError):
-            with open(_session_file(), "w") as fh:
-                json.dump(
-                    {"refresh_token": self.refresh_token, "email": self.email}, fh
-                )
+    def resume(self, refresh_token: str | None) -> bool:
+        """Resume a previous login from a stored refresh token.
 
-    def restore_session(self) -> bool:
-        """Resume a previous login. Returns True if the app can skip the login screen."""
-        try:
-            with open(_session_file()) as fh:
-                saved = json.load(fh)
-        except (OSError, ValueError):
+        Returns True if the app can skip the login screen.
+        """
+        if not refresh_token:
             return False
-        self.refresh_token = saved.get("refresh_token")
-        self.email = saved.get("email")
-        return bool(self.refresh_token) and self._refresh()
+        self.refresh_token = refresh_token
+        return self._refresh()
 
     @property
     def signed_in(self) -> bool:
@@ -206,6 +226,14 @@ class FridgeApi:
         if not entries:
             raise ApiError("Nothing to save yet.")
         self._rpc("save_items", {"entries": entries})
+
+    def set_capacity(self, capacity_text: str) -> None:
+        """Change how many slots the fridge holds, for the whole household."""
+        try:
+            capacity = int((capacity_text or "").strip())
+        except ValueError:
+            raise ApiError("Capacity must be a whole number.")
+        self._rpc("set_capacity", {"new_capacity": capacity})
 
     def adjust_item(self, item_id: str, delta: int) -> None:
         self._rpc("adjust_item", {"item_id": item_id, "delta": delta})
