@@ -224,3 +224,7 @@ fridge.db
 fridge.db-journal
 fridge.db-wal
 fridge.db-shm
+
+# Supabase credentials. The anon key is meant to ship inside the client app,
+# but this repo is public, so keep it out of git. See config.example.py.
+/config.py
