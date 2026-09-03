@@ -1,0 +1,8 @@
+.git
+.flet
+build
+__pycache__
+*.pyc
+config.py
+supabase
+test.py

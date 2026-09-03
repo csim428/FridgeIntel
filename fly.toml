@@ -1,0 +1,19 @@
+# fly.toml -- deploy with: fly launch --no-deploy   then   fly deploy
+app = "fridgeintel"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  # Keep one machine warm. Flet holds a websocket per connected roommate, so
+  # stopping the machine would drop their sessions mid-use.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

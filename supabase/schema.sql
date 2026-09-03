@@ -310,3 +310,39 @@ as $$
                                  where user_id = auth.uid())), '[]'::jsonb)
   );
 $$;
+
+-- ---------------------------------------------------------------------------
+-- RPC: changing how much the fridge holds
+-- ---------------------------------------------------------------------------
+--
+-- Capacity is shared, so this changes it for the whole household. SECURITY
+-- DEFINER because the policies above grant no UPDATE on households; this
+-- function is the only way to change it, and it validates first.
+
+create or replace function set_capacity(new_capacity int)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  hh   uuid := current_household();
+  used int;
+begin
+  if hh is null then
+    raise exception 'You are not a member of a household yet';
+  end if;
+  if new_capacity is null or new_capacity < 1 or new_capacity > 999 then
+    raise exception 'Capacity must be a number between 1 and 999';
+  end if;
+
+  -- Refuse to shrink below what is already in there; the alternative is an
+  -- over-full fridge that every other check then has to reason about.
+  select coalesce(sum(qty), 0) into used from items where household_id = hh;
+  if new_capacity < used then
+    raise exception 'The fridge already holds % item(s). Remove some first.', used;
+  end if;
+
+  update households set capacity = new_capacity where id = hh;
+end;
+$$;
